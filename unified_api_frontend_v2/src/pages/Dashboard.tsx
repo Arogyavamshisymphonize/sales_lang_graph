@@ -33,54 +33,31 @@ export default function Dashboard() {
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    // Initialize session (load history or start new)
+    // Load sessions on mount
     useEffect(() => {
-        const loadHistory = async () => {
+        const loadSessions = async () => {
             try {
-                const history = await apiClient.getHistory();
-                if (history.session_id && history.messages.length > 0) {
-                    // Restore session
-                    const restoredSession: ChatSession = {
-                        id: history.session_id,
-                        title: 'Previous Session',
-                        messages: history.messages.map((msg, index) => ({
-                            id: `msg-history-${index}`,
-                            role: msg.isUser ? 'user' : 'assistant',
-                            content: msg.content,
-                            timestamp: new Date(), // Timestamp not persisted in simple history
-                        })),
-                        createdAt: new Date(),
-                    };
-                    setSessions([restoredSession]);
-                    setCurrentSessionId(history.session_id);
+                const sessionList = await apiClient.getSessions();
+                if (sessionList.length > 0) {
+                    // Convert metadata to ChatSession (initially without messages)
+                    const chatSessions: ChatSession[] = sessionList.map(s => ({
+                        id: s.session_id,
+                        title: s.title || 'Chat',
+                        messages: [], // Will load on select
+                        createdAt: new Date(s.created_at)
+                    }));
+                    setSessions(chatSessions);
+                    // Select the most recent session
+                    setCurrentSessionId(chatSessions[0].id);
                 } else {
-                    // No history, start new chat
-                    const newSessionId = `session-${Date.now()}`;
-                    const newSession: ChatSession = {
-                        id: newSessionId,
-                        title: 'New Chat',
-                        messages: [],
-                        createdAt: new Date(),
-                    };
-                    setSessions([newSession]);
-                    setCurrentSessionId(newSessionId);
+                    handleNewChat();
                 }
             } catch (error) {
-                console.error('Failed to load history:', error);
-                // Fallback to new chat
-                const newSessionId = `session-${Date.now()}`;
-                const newSession: ChatSession = {
-                    id: newSessionId,
-                    title: 'New Chat',
-                    messages: [],
-                    createdAt: new Date(),
-                };
-                setSessions([newSession]);
-                setCurrentSessionId(newSessionId);
+                console.error('Failed to load sessions:', error);
+                handleNewChat();
             }
         };
-
-        loadHistory();
+        loadSessions();
     }, []);
 
     // Scroll to bottom when messages change
@@ -88,15 +65,43 @@ export default function Dashboard() {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    // Load messages for current session
+    // Load history when currentSessionId changes
     useEffect(() => {
-        if (currentSessionId) {
-            const session = sessions.find((s) => s.id === currentSessionId);
-            if (session) {
-                setMessages(session.messages);
+        const loadHistory = async () => {
+            if (!currentSessionId) return;
+
+            // If it's a new local session, don't fetch history
+            if (currentSessionId.startsWith('session-')) {
+                setMessages([]);
+                return;
             }
-        }
-    }, [currentSessionId, sessions]);
+
+            // Check if we already have messages for this session in state (optimization)
+            // Actually, better to fetch fresh history to ensure sync
+            try {
+                const history = await apiClient.getHistory(currentSessionId);
+                if (history.messages) {
+                    const formattedMessages: Message[] = history.messages.map((msg, index) => ({
+                        id: `msg-${index}-${Date.now()}`,
+                        role: msg.isUser ? 'user' : 'assistant',
+                        content: msg.content,
+                        timestamp: new Date(), // Backend doesn't return timestamp yet
+                    }));
+                    setMessages(formattedMessages);
+
+                    // Update session in list with messages
+                    setSessions(prev => prev.map(s =>
+                        s.id === currentSessionId ? { ...s, messages: formattedMessages } : s
+                    ));
+                }
+            } catch (error) {
+                console.error('Failed to load history for session:', currentSessionId, error);
+                toast.error('Failed to load chat history');
+            }
+        };
+
+        loadHistory();
+    }, [currentSessionId]);
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -138,28 +143,33 @@ export default function Dashboard() {
             // Update session with real UUID from backend if it was a new session
             if (isNewSession && response.session_id) {
                 const newId = response.session_id;
+                const newTitle = inputValue.substring(0, 30) + (inputValue.length > 30 ? '...' : '');
+
+                // Update current ID
                 setCurrentSessionId(newId);
+
+                // Update session list
                 setSessions((prev) =>
                     prev.map((session) => {
                         if (session.id === currentSessionId) {
                             return {
                                 ...session,
                                 id: newId,
-                                title: session.title === 'New Chat' ? inputValue.substring(0, 50) : session.title,
-                                messages: [...session.messages, userMessage, assistantMessage],
+                                title: newTitle,
+                                messages: [...messages, userMessage, assistantMessage], // Use current messages + new ones
                             };
                         }
                         return session;
                     })
                 );
             } else {
-                // Existing session, just update messages
+                // Existing session, just update messages in session list too
                 setSessions((prev) =>
                     prev.map((session) => {
                         if (session.id === currentSessionId) {
                             return {
                                 ...session,
-                                messages: [...session.messages, userMessage, assistantMessage],
+                                messages: [...messages, userMessage, assistantMessage],
                             };
                         }
                         return session;
@@ -220,7 +230,7 @@ export default function Dashboard() {
                         >
                             <div className="truncate text-sm font-medium">{session.title}</div>
                             <div className="text-xs opacity-70">
-                                {session.messages.length} messages
+                                {session.createdAt.toLocaleDateString()}
                             </div>
                         </button>
                     ))}

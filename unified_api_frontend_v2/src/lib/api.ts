@@ -69,6 +69,14 @@ export interface ChatResponse {
     strategies?: string[];
 }
 
+export interface SessionMetadata {
+    id: string;
+    session_id: string;
+    title: string;
+    created_at: string;
+    updated_at: string;
+}
+
 class APIClient {
     private client: AxiosInstance;
     private token: string | null = null;
@@ -160,8 +168,15 @@ class APIClient {
         return response.data;
     }
 
-    async getHistory(): Promise<{ messages: { content: string; isUser: boolean }[]; session_id: string | null }> {
-        const response = await this.client.get<{ messages: { content: string; isUser: boolean }[]; session_id: string | null }>('/api/agent/history');
+    async getSessions(): Promise<SessionMetadata[]> {
+        const response = await this.client.get<SessionMetadata[]>('/api/agent/sessions');
+        return response.data;
+    }
+
+    async getHistory(session_id?: string): Promise<{ messages: { content: string; isUser: boolean }[]; session_id: string | null }> {
+        const response = await this.client.get<{ messages: { content: string; isUser: boolean }[]; session_id: string | null }>('/api/agent/history', {
+            params: { session_id }
+        });
         return response.data;
     }
 

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { UserResponse } from '@/lib/api';
+import { UserResponse, apiClient } from '@/lib/api';
 
 interface AuthContextType {
     user: UserResponse | null;
@@ -36,11 +36,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsLoading(false);
     }, []);
 
+
+
     const login = (userData: UserResponse, authToken: string) => {
         setUser(userData);
         setToken(authToken);
         localStorage.setItem('auth_token', authToken);
         localStorage.setItem('user', JSON.stringify(userData));
+        apiClient.setAuthToken(authToken);
     };
 
     const logout = () => {
@@ -48,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setToken(null);
         localStorage.removeItem('auth_token');
         localStorage.removeItem('user');
+        apiClient.clearAuth();
     };
 
     const value: AuthContextType = {
